@@ -12,3 +12,4 @@ pom.xml.asc
 .lsp/sqlite*.db
 /*.scad
 .DS_Store
+.calva
