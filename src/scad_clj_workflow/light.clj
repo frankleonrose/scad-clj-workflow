@@ -287,7 +287,17 @@
         frame-height (inches-to-mm 6)
         led-gap (inches-to-mm 1)
         rod-thickness (inches-to-mm 0.5)
-        led-length (- frame-length (* 2 led-gap) (* 2 rod-thickness))]
+        led-length (- frame-length (* 2 led-gap) (* 2 rod-thickness))
+        frame-rod (fn [frame-height]
+                    (m/difference
+                     (rod frame-height)
+                     (m/union
+                      (->> (m/cube (inches-to-mm 1.5) (* 2 rod-thickness) (/ rod-thickness 1.5))
+                           (m/translate [(/ frame-height 2) 0 0]))
+                      (->> (m/cylinder 2.5 frame-height)
+                           (m/translate [(- (/ frame-height 2) 5) 0 0]))
+                      (->> (m/cylinder 2.5 frame-height)
+                           (m/translate [(- (/ frame-height 2) (inches-to-mm 1)) 3 0])))))]
     (prn {:long-rod (mm-to-inches frame-length)
           :short-rods (mm-to-inches (+ frame-height wood-thickness shower/corrugation-amplitude-mm))
           :shade-length (mm-to-inches fixture-length)
@@ -328,13 +338,13 @@
       (->> (m/union
             (->> (rod frame-length)
                  (m/rotate [0 0 0]))
-            (->> (rod frame-height)
-                 (m/rotate [0 (/ Math/PI 2) 0])
+            (->> (frame-rod frame-height)
+                 (m/rotate [(/ Math/PI 2) (/ Math/PI -2) 0])
                  (m/translate [(/ frame-length 2) 0
                                (+ (/ frame-height 2)
                                   (inches-to-mm -0.25))]))
-            (->> (rod frame-height)
-                 (m/rotate [0 (/ Math/PI 2) 0])
+            (->> (frame-rod frame-height)
+                 (m/rotate [(/ Math/PI 2) (/ Math/PI -2)  0])
                  (m/translate [(/ frame-length -2) 0
                                (+ (/ frame-height 2)
                                   (inches-to-mm -0.25))]))
