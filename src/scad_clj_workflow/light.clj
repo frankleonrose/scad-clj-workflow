@@ -1,6 +1,6 @@
 ;; https://github.com/PEZ/scad-clj-workflow
 (ns scad-clj-workflow.light
-  (:require [scad-clj-workflow.outdoor-shower :refer [inches-to-mm] :as shower]
+  (:require [scad-clj-workflow.outdoor-shower :refer [inches-to-mm corrugation-period-mm corrugation-amplitude-mm] :as shower]
             [scad-clj.model :as m]
             [scad-clj-workflow.helpers :refer [render]]))
 
@@ -54,18 +54,16 @@
        #_
        (m/extrude-rotate {:angle 90 :convexity 1.1})))
 
-(def corrugation-period-mm 70)
-(def corrugation-amplitude-mm 10)
 (defn corrugations [distance-mm]
-  (quot distance-mm corrugation-period-mm))
+  (/ distance-mm corrugation-period-mm))
 
 (defn curved-corrugated-side [fraction-of-circle radius]
   (let [steps 200
         waves (corrugations (* 2 Math/PI fraction-of-circle radius))
         arc (* 2 Math/PI fraction-of-circle (/ steps))
-        wavelet (* (+ waves 0.5) 2 Math/PI (/ steps))]
+        rad-per-step (* (+ waves 0.5) 2 Math/PI (/ steps))]
     (for [i (range steps)
-          :let [modulate (* corrugation-amplitude-mm (Math/sin (* wavelet i)))
+          :let [modulate (* corrugation-amplitude-mm (Math/sin (* rad-per-step i)))
                 radius (+ radius modulate)
                 x (* radius (Math/cos (* i arc)))
                 y (* radius (Math/sin (* i arc)))]]
@@ -79,8 +77,8 @@
    (m/extrude-linear {:height height})
    (m/color pipe-color)))
 
-(defn flat-corrugated [width length]
-  (->> (shower/flat-corrugated width length)
+(defn flat-corrugated [width length phase]
+  (->> (shower/flat-corrugated width length phase)
        (m/rotate [(/ Math/PI -2) 0 (/ Math/PI 2)])
        (m/translate [(/ length -2) 0 0])))
 
@@ -221,8 +219,9 @@
       (->> (m/cube fixture-length fixture-width wood-thickness)
            (m/translate [0 0 wood-margin])
            (m/color wood-color))
+
       ;; Corrugated reflector
-      (flat-corrugated width length)
+      (flat-corrugated width length 0)
 
       ;; Screws
       (apply m/union
@@ -274,57 +273,74 @@
         awning-width (inches-to-mm 22)
         awning-lip (inches-to-mm 1.5)
         fixture-margin (inches-to-mm 6)
-        fixture-length (- awning-length (* 2 fixture-margin))
+        fixture-length (->> (range)
+                            (map #(* % corrugation-period-mm))
+                            (remove #(> (- awning-length %) (* 2 fixture-margin)))
+                            first)
+        #_(- awning-length (* 2 fixture-margin))
         fixture-width (- awning-width (* 2 fixture-margin))
-        frame-margin (inches-to-mm 3)
+        frame-margin (* 2 corrugation-period-mm) #_(inches-to-mm (- 4 0.26))
         frame-length (- fixture-length (* 2 frame-margin))
-        wood-width (- fixture-width (* 2 frame-margin))
+        wood-width (inches-to-mm 3.5) ;; 4x1 cedar board
         screw-offset-y (/ wood-width 3)
         screw-count 10
         wood-thickness (inches-to-mm 0.75)
-        wood-z (inches-to-mm 1)
-        awning-z (+ wood-z wood-thickness)
-        frame-height (inches-to-mm 6)
+        wood-z (+ (/ wood-thickness 2) corrugation-amplitude-mm)
+        awning-z (+ wood-z (/ wood-thickness 2) (inches-to-mm 1))
+        frame-height (inches-to-mm 8)
         led-gap (inches-to-mm 1)
+        rod-length (+ frame-height wood-thickness corrugation-amplitude-mm)
         rod-thickness (inches-to-mm 0.5)
         led-length (- frame-length (* 2 led-gap) (* 2 rod-thickness))
-        frame-rod (fn [frame-height]
+        frame-rod (fn [length]
                     (m/difference
-                     (rod frame-height)
+                     (m/union
+                      (rod length)
+                      ;; openscad clojure code for torus
+                      (->> (m/extrude-rotate
+                            {:convexity 10}
+                            (->> (m/circle 5)
+                                 (m/translate [10 0])))
+                           (m/rotate [0 0 (/ Math/PI 2)])
+                           (m/translate [(- (/ length 2) 5) 0 0])))
                      (m/union
                       (->> (m/cube (inches-to-mm 1.5) (* 2 rod-thickness) (/ rod-thickness 1.5))
-                           (m/translate [(/ frame-height 2) 0 0]))
-                      (->> (m/cylinder 2.5 frame-height)
-                           (m/translate [(- (/ frame-height 2) 5) 0 0]))
-                      (->> (m/cylinder 2.5 frame-height)
-                           (m/translate [(- (/ frame-height 2) (inches-to-mm 1)) 3 0])))))]
-    (prn {:long-rod (mm-to-inches frame-length)
-          :short-rods (mm-to-inches (+ frame-height wood-thickness shower/corrugation-amplitude-mm))
-          :shade-length (mm-to-inches fixture-length)
-          :shade-width (mm-to-inches fixture-width)}
-         :led-length (str (float (/ led-length 1000)) "m"))
+                           (m/translate [(/ length 2) 0 0]))
+                      (->> (m/cylinder 2.5 length)
+                           (m/translate [(- (/ length 2) 5) 0 0]))
+                      (->> (m/cylinder 2.5 length)
+                           (m/translate [(- (/ length 2) (+ wood-thickness (inches-to-mm 0.5))) 3 0])))))
+        prn-inches #(-> % mm-to-inches (str \"))]
+    (clojure.pprint/pprint
+     {:long-rod (prn-inches frame-length)
+      :long-rod-corrugations (float (/ (- frame-length rod-thickness) corrugation-period-mm))
+      :short-rods (prn-inches (+ frame-height wood-thickness corrugation-amplitude-mm))
+      :shade-length (prn-inches fixture-length)
+      :shade-width (prn-inches fixture-width)
+      :fixture-corrugations (float (/ fixture-length corrugation-period-mm))
+      :led-length (str (float (/ led-length 1000)) "m")})
     (->>
      (m/union
-        ;; Awning ceiling
+      ;; Awning ceiling
       (->> (m/cube awning-length awning-width 1)
            (m/translate [0 0 awning-z])
            (m/color pipe-color))
-        ;; Awning lip
+      ;; Awning lip
       (->> (m/cube awning-length awning-lip 1)
            (m/rotate [(/ Math/PI 2) 0 0])
            (m/translate [0 (/ awning-width 2) (- awning-z (/ awning-lip 2))])
            (m/color pipe-color))
 
       ;; Wooden base
-      (->> (m/cube frame-length wood-width wood-thickness)
+      (->> (m/cube (+ frame-length corrugation-period-mm) wood-width wood-thickness)
            (m/translate [0 0 wood-z])
            (m/color wood-color))  ;; Needs to be painted black, because visible
 
-        ;; Corrugated reflector
-      (->> (flat-corrugated fixture-length fixture-width)
+      ;; Corrugated reflector
+      (->> (flat-corrugated fixture-length fixture-width (* Math/PI 1.5))
            (m/rotate [0 0 (/ Math/PI 2)]))
 
-        ;; Screws
+      ;; Screws
       (apply m/union
              (for [offset-y [screw-offset-y (- screw-offset-y)]
                    row (range screw-count)
@@ -334,19 +350,19 @@
                     (m/translate [offset-x offset-y 0])
                     (m/color pipe-color))))
 
-        ;; Light frame
+      ;; Light frame
       (->> (m/union
             (->> (rod frame-length)
                  (m/rotate [0 0 0]))
-            (->> (frame-rod frame-height)
+            (->> (frame-rod rod-length)
                  (m/rotate [(/ Math/PI 2) (/ Math/PI -2) 0])
                  (m/translate [(/ frame-length 2) 0
-                               (+ (/ frame-height 2)
+                               (+ (/ rod-length 2)
                                   (inches-to-mm -0.25))]))
-            (->> (frame-rod frame-height)
+            (->> (frame-rod rod-length)
                  (m/rotate [(/ Math/PI 2) (/ Math/PI -2)  0])
                  (m/translate [(/ frame-length -2) 0
-                               (+ (/ frame-height 2)
+                               (+ (/ rod-length 2)
                                   (inches-to-mm -0.25))]))
             ;; LED strip
             (->> (m/cube led-length 16 5)
@@ -355,9 +371,12 @@
             (->> (m/cube led-length 11 5)
                  (m/color light-color)
                  (m/translate [0 0 10])))
-           (m/translate [0 0 (+ (- frame-height)
-                                wood-z
-                                wood-thickness)])))
+
+           (m/translate [0 0 (+ (- rod-length)
+                                (inches-to-mm -0.25)
+                                (* 2 corrugation-amplitude-mm)
+                                wood-thickness
+                                (inches-to-mm 0.4))])))
 
      (m/translate [0 0 -1000])))
 
@@ -371,4 +390,7 @@
 
 (comment
   (ns-unmap *ns* 'flat-corrugated)
+
+  (def length-of-long-rod-in-corrugations
+    (float (/ (inches-to-mm 96.46) corrugation-period-mm)))
   )

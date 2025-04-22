@@ -15,41 +15,43 @@
 (defn feet-to-mm [feet]
   (* feet 12 25.4))
 
-(def corrugation-period-mm 70)
+(def corrugation-period-mm 67.5)
 (def corrugation-amplitude-mm (inches-to-mm 0.5))
 (defn corrugations [distance-mm]
-  (quot distance-mm corrugation-period-mm))
+  (/ distance-mm corrugation-period-mm))
 
 (defn flat-corrugated-side
-  ([width]
-   (flat-corrugated-side width 0))
-  ([width delta-y]
-   (let [steps 200
-         waves (corrugations width)
-         wavelet (* (+ waves 0.5) 2 Math/PI (/ steps))]
+  ([width phase]
+   (flat-corrugated-side width phase 0))
+  ([width phase delta-y]
+   (let [waves (corrugations width)
+         steps (int (* waves 20))
+         rad-per-step (* waves 2 Math/PI (/ steps))]
      (for [i (range steps)
-           :let [modulate (* corrugation-amplitude-mm (Math/sin (* wavelet i)))
+           :let [modulate (* corrugation-amplitude-mm (Math/sin (+ (* rad-per-step i) phase)))
                  x (* i width (/ 1 steps))
                  y (+ modulate delta-y)]]
        [x y]))))
 
-(defn flat-corrugated [width height]
-  (->> (m/union
-        (->>
-         (concat (flat-corrugated-side width)
-                 (reverse (flat-corrugated-side width -0.5)))
-         (m/polygon)
-         (m/extrude-linear {:height height})
-         (m/color pipe-color))
-        (->>
-         (concat (flat-corrugated-side width)
-                 (reverse (flat-corrugated-side width -0.5)))
+(defn flat-corrugated
+  ([width height] (flat-corrugated width height 0))
+  ([width height phase]
+   (->> (m/union
+         (->>
+          (concat (flat-corrugated-side width phase)
+                  (reverse (flat-corrugated-side width phase -0.5)))
+          (m/polygon)
+          (m/extrude-linear {:height height})
+          (m/color pipe-color))
+         (->>
+          (concat (flat-corrugated-side width phase)
+                  (reverse (flat-corrugated-side width phase -0.5)))
 
-         (m/polygon)
-         (m/extrude-linear {:height height})
-         (m/translate [0 0.1 0])
-         (m/color pipe-inside-color)))
-       (m/translate [(/ width -2) 0 (/ height -2)])))
+          (m/polygon)
+          (m/extrude-linear {:height height})
+          (m/translate [0 0.1 0])
+          (m/color pipe-inside-color)))
+        (m/translate [(/ width -2) 0 (/ height -2)]))))
 
 (def shower-width-mm (feet-to-mm 6.5))
 (def shower-length-mm (feet-to-mm 8))
