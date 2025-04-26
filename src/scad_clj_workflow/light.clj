@@ -275,12 +275,17 @@
         fixture-margin (inches-to-mm 6)
         fixture-length (->> (range)
                             (map #(* % corrugation-period-mm))
-                            (remove #(> (- awning-length %) (* 2 fixture-margin)))
+                            (drop-while #(> (- awning-length %) (* 2 fixture-margin)))
                             first)
-        #_(- awning-length (* 2 fixture-margin))
+        rod-width (inches-to-mm 0.5)
         fixture-width (- awning-width (* 2 fixture-margin))
         frame-margin (* 2 corrugation-period-mm) #_(inches-to-mm (- 4 0.26))
-        frame-length (- fixture-length (* 2 frame-margin))
+        frame-length (-> fixture-length
+                         (- (* 2 frame-margin))
+                         ;; Rods are centered on corrugation peak.
+                         ;; Therefore, frame is half a rod width
+                         ;; longer on either end. Add a full rod width.
+                         (+ rod-width))
         wood-width (inches-to-mm 3.5) ;; 4x1 cedar board
         screw-offset-y (/ wood-width 3)
         screw-count 10
@@ -290,8 +295,7 @@
         frame-height (inches-to-mm 8)
         led-gap (inches-to-mm 1)
         rod-length (+ frame-height wood-thickness corrugation-amplitude-mm)
-        rod-thickness (inches-to-mm 0.5)
-        led-length (- frame-length (* 2 led-gap) (* 2 rod-thickness))
+        led-length (- frame-length (* 2 led-gap) (* 2 rod-width))
         frame-rod (fn [length]
                     (m/difference
                      (m/union
@@ -304,16 +308,16 @@
                            (m/rotate [0 0 (/ Math/PI 2)])
                            (m/translate [(- (/ length 2) 5) 0 0])))
                      (m/union
-                      (->> (m/cube (inches-to-mm 1.5) (* 2 rod-thickness) (/ rod-thickness 1.5))
+                      (->> (m/cube (inches-to-mm 1.5) (* 2 rod-width) (/ rod-width 1.5))
                            (m/translate [(/ length 2) 0 0]))
                       (->> (m/cylinder 2.5 length)
                            (m/translate [(- (/ length 2) 5) 0 0]))
                       (->> (m/cylinder 2.5 length)
                            (m/translate [(- (/ length 2) (+ wood-thickness (inches-to-mm 0.5))) 3 0])))))
         prn-inches #(-> % mm-to-inches (str \"))]
-    (clojure.pprint/pprint
+    (print
      {:long-rod (prn-inches frame-length)
-      :long-rod-corrugations (float (/ (- frame-length rod-thickness) corrugation-period-mm))
+      :long-rod-corrugations (float (/ (- frame-length rod-width) corrugation-period-mm))
       :short-rods (prn-inches (+ frame-height wood-thickness corrugation-amplitude-mm))
       :shade-length (prn-inches fixture-length)
       :shade-width (prn-inches fixture-width)
