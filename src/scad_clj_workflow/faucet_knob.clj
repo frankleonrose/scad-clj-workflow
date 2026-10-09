@@ -57,8 +57,8 @@
     model))
 
 (binding [m/*fn* 40
-          m/*fs* 2
-          m/*fa* 12]
+          m/*fs* 0.1
+          m/*fa* 0.1]
   (let [petals (->> (for [i (range petal-count)]
                       (->> (m/cylinder petal-radius 1)
                            (m/scale [1.9 1 1])
