@@ -2,7 +2,15 @@
 (ns scad-clj-workflow.splitnet-housing
   (:require [scad-clj.model :as m]
             [scad-clj-workflow.helpers :refer [render]]
-            [scad-clj-workflow.extra.clip :refer [clip]]))
+            [scad-clj-workflow.extra.clip :refer [clip largest-dimension]]
+            [scad-clj-workflow.extra.calc :refer [calc]]))
+
+(def m2-tap-hole-radius=bottom (/ 1.7 2))
+(def m2-tap-hole-radius-top (/ 2.0 2))
+(def m2-tap-hole-depth 5)
+(def m2-through-hole-radius (/ 2.4 2))
+(def m2-flat-head-radius (/ 4 2))
+(def m2-flat-bevel-length 1.2)
 
 ;; The circuit board is made of 3 intersecting circles, one large in the middle with
 ;; two smaller ones on each side.
@@ -18,7 +26,7 @@
 (def screen-radius         (/ round-screen-diameter 2.0))
 
 (def board
-  (m/color [0.75 0 0]
+  (m/color [0.75 0 0 0.5]
            (->> (m/union
                  (m/cylinder large-board-radius board-thickness)
                  (->> (m/cylinder small-board-radius board-thickness)
@@ -28,7 +36,7 @@
                       (m/translate [(- large-board-radius) 0 0])))
                 (m/translate [0 0 board-height]))))
 (def screen
-  (m/color [0 0 0]
+  (m/color [0 0 0 0.5]
            (->> (m/cylinder screen-radius board-thickness)
                 (m/translate [0 0 (- screen-height (/ board-thickness 2))]))))
 
@@ -36,6 +44,7 @@
 (def back-thickness     1.5)
 (def back-rim-thickness 1.5)
 (def wall-thickness     1)
+(def screen-gap         0.1)
 (def wall-gap           0.5)
 
 (def small-dome-radius            (+ small-board-radius wall-gap))
@@ -95,36 +104,65 @@
              (m/translate [(- large-board-radius) 0 board-height])
              (clip [0 0 0] [0 0 -1]))
         antenna-dome-cutout
-
         main-dome-cutout)))
 
 (def cable-dome-cutout
-  (->> (m/sphere small-dome-radius)
+  (->> (m/union
+        (m/sphere small-dome-radius)
+        (->> (m/cylinder 3 80)
+             (m/rotate [0 (- (/ Math/PI 3.5)) 0])))
        (m/translate [large-board-radius 0 board-height])))
 (def cable-dome
   (m/difference
    (->> (m/difference
          (m/sphere (+ small-dome-radius wall-thickness))
-         (m/sphere small-dome-radius))
+         (m/sphere small-dome-radius)
+         (->> (m/cylinder 3 80)
+              (m/rotate [0 (- (/ Math/PI 3.5)) 0])))
         (m/translate [large-board-radius 0 board-height])
         (clip [0 0 0] [0 0 -1]))
    main-dome-cutout))
 
-(def screen-cutout (m/cylinder (+ screen-radius wall-gap) largest-dimension))
-(def main-dome (->> (m/difference
-                     (m/sphere (+ dome-radius wall-thickness))
-                     (m/sphere dome-radius)
-                     ;; Cut the screen cylinder out
-                     screen-cutout
-                     antenna-dome-cutout
-                     cable-dome-cutout)
-                    ;; Cut the top off the dome
-                    (clip [0 0 screen-height])
-                    (clip [0 0 0] [0 0 -1])))
+(def text-height 0.5)
+(def label-text "Splitnet 2026-10-11 ♥️")
+
+(def screen-cutout (m/cylinder (+ screen-radius screen-gap) largest-dimension))
+(def main-dome
+  (->> (m/difference
+        (m/sphere #_(+ dome-radius wall-thickness)
+         (str "(" dome-radius "+" wall-thickness " + (5 * $t))")
+                  #_'(multiply dome-radius $t)
+                  #_['+ ['+ dome-radius ['* '$t 11]] wall-thickness])
+        (m/sphere dome-radius)
+        ;; Cut the screen cylinder out
+        screen-cutout
+        antenna-dome-cutout
+        cable-dome-cutout)
+       ;; Cut the top off the dome
+       (clip [0 0 screen-height])
+       (clip [0 0 0] [0 0 -1])
+       (m/union
+        (m/intersection
+         (m/difference
+          ;; dome-text
+          (->> (m/text label-text :size 2
+                       :halign "center" :valign "center")
+               (m/extrude-linear {:height 20 :center true})
+               (m/rotate [(/ Math/PI -2) 0 (/ Math/PI 4)])
+               (m/translate [(* dome-radius 0.7) (- (* dome-radius 0.7)) 4]))
+          ;; Clip text a bit inside dome radius
+          (m/sphere (- dome-radius text-height)))
+         ;; Clip text outside dome
+         (m/sphere (+ dome-radius (/ wall-thickness 2)))))))
 
 (def top-part-volume
   (m/union
-   (m/sphere (+ dome-radius wall-thickness))
+   (m/sphere #_(+ dome-radius wall-thickness)
+    #_(calc-infix dome-radius# + wall-thickness# + (55 * $t))
+             (calc (+ dome-radius# wall-thickness# (* 55 $t)))
+             #_(str "(" dome-radius "+" wall-thickness " + (5 * $t))")
+             #_'(multiply dome-radius $t)
+             #_['+ ['+ dome-radius ['* '$t 11]] wall-thickness])
    (->> (m/sphere (+ small-dome-radius wall-thickness))
         (m/translate [large-board-radius 0 board-height]))
    (->> (m/sphere (+ small-dome-radius wall-thickness))
@@ -136,25 +174,25 @@
           (map (fn [[x y]]
                  (->> (m/difference
                        (m/cylinder 2.5 100 :center false)
-                       (->> (m/cylinder 0.75 5 :center false)
+                       (->> (m/cylinder [m2-tap-hole-radius-top m2-tap-hole-radius=bottom] m2-tap-hole-depth :center false)
                             (m/translate [0 0 -0.1])))
                       (m/rotate [0 0 (/ Math/PI 2)])
                       (m/translate [x y (+ board-height board-thickness)])))
                board-mount-coordinates))
    top-part-volume))
 
+(def back-mount-radius 2.5)
 (def back-mounts
-  (m/intersection
-   (apply m/union
-          (map (fn [[x y]]
-                 (->> (m/difference
-                       (m/cylinder 2.5 100 :center false)
-                       (->> (m/cylinder 0.75 5 :center false)
-                            (m/translate [0 0 -0.1])))
-                      (m/rotate [0 0 (/ Math/PI 2)])
-                      (m/translate [x y 0])))
-               back-mount-coordinates))
-   top-part-volume))
+  (->> back-mount-coordinates
+       (map (fn [[x y]]
+              (->> (m/difference
+                    (m/cylinder back-mount-radius 100 :center false)
+                    (->> (m/cylinder [m2-tap-hole-radius-top m2-tap-hole-radius=bottom] m2-tap-hole-depth :center false)
+                         (m/translate [0 0 -0.1])))
+                   (m/rotate [0 0 (/ Math/PI 2)])
+                   (m/translate [x y 0]))))
+       (apply m/union)
+       (m/intersection top-part-volume)))
 
 (def top-part
   (m/difference
@@ -177,33 +215,55 @@
                    ;;(m/projection true)
                    ;;(m/extrude-linear {:height back-thickness :center false})
                    )]
-    (m/union plate
-             (->> (m/intersection
-                   (m/difference
-                    ;; Rim with inner offset
-                    (->> rim
-                         (m/projection true)
-                         (m/offset {:r 2 :chamfer true})
-                         (m/extrude-linear {:height back-rim-thickness :center false}))
-                    (->> rim
-                         (m/scale [1 1 2]))
-                    (m/hull back-mounts))
-                   ;; Need to trim off outer offset material usingi intersection
-                   ;; because m/offset wth negative parameter does not work.
-                   ;; Or I don't understand how it works
-                   (->> plate
-                        (m/scale [0.98 0.98 1])))
-                  (m/translate [0 0 back-thickness])))))
+    (-> (m/union
+         plate
+         (->> (-> ;; Rim with inner offset
+               (->> rim
+                    (m/projection true)
+                    (m/offset {:r 2 :chamfer true})
+                    (m/extrude-linear {:height back-rim-thickness :center false}))
+               (m/difference
+                (->> rim
+                     (m/scale [1 1 2])))
+               (m/intersection
+                ;; Need to trim off outer offset material using intersection
+                ;; because m/offset wth negative parameter does not work.
+                ;; Or I don't understand how it works
+                (->> plate
+                     (m/scale [0.98 0.98 1]))))
+              (m/translate [0 0 (str "(" back-thickness " * (1 + 5 * $t))")]))
+         (->> (m/text label-text :size 3
+                      :halign "center" :valign "center")
+              (m/extrude-linear {:height text-height :center false})
+              (m/translate [0 0 back-thickness])))
+
+        (m/difference
+         (->> back-mount-coordinates
+              (map (fn [[x y]]
+                     (->> (m/union
+                           ;; Beveled head
+                           (m/cylinder [m2-flat-head-radius m2-through-hole-radius] m2-flat-bevel-length :center false)
+                           ;; Through hole - goes through back not traversed by bevel
+                           (m/cylinder m2-through-hole-radius 20 :center true))
+                          ;; Clear inner rim
+                          (->> (m/cylinder (+ back-mount-radius 0.5) 20 :center false)
+                               (m/translate [0 0 back-thickness]))
+                          (m/translate [x y 0]))))
+              (apply m/union)
+              (m/intersection top-part-volume))))))
 
 (->> (m/union
       (m/fn! 50)
       (m/fa! 1)
       (m/fs! 1)
-      ;;board
-      ;;screen
-      (->> top-part
+      (->> (m/union
+            top-part
+            ;; board
+            ;; screen
+            )
            (m/rotate [Math/PI 0 0])
            (m/translate [0 0 screen-height]))
       (->> bottom-part
            (m/translate [0 75 0])))
+     (m/render 10)
      (render))
